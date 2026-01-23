@@ -1,0 +1,25 @@
+{
+  "window": {
+    "width": 1920,
+    "height": 1080,
+    "fullscreen": false,
+    "dark_mode": true
+  },
+  "grid": {
+    "rows": 2,
+    "cols": 2,
+    "panel_padding": 4.0,
+    "info_overlay_height": 28.0,
+    "show_git_info": true,
+    "show_status_indicator": true,
+    "show_file_activity": false
+  },
+  "terminal": {
+    "command": "",
+    "shell": ""
+  },
+  "theme": {
+    "accent": [0.3, 0.7, 0.4]
+  },
+  "agents": []
+}

@@ -1,0 +1,88 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# Output binaries (keep bin/ but ignore contents except config template)
+bin/*
+!bin/.gitkeep
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Visual Studio
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+.vs/
+Debug/
+Release/
+x64/
+x86/
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.lib
+*.exp
+
+# Visual Studio Code
+.vscode/
+
+# CLion / JetBrains
+.idea/
+*.iml
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+
+# macOS
+.DS_Store
+._*
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Linux
+*~
+
+# Executables
+*.exe
+*.out
+*.app
+*.dll
+*.so
+*.dylib
+
+# Object files
+*.o
+*.obj
+*.a
+
+# Precompiled headers
+*.gch
+*.pch
+
+# Dependencies fetched by CMake
+_deps/
+
+# Config with secrets (keep template)
+config.json
+!config.json.template
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
