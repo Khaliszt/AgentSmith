@@ -14,8 +14,9 @@ cmake_install.cmake
 Makefile
 compile_commands.json
 
-# claude context
-CLAUDE_CONTEXt.md 
+# Claude context and reference scripts
+Claude_Context.md
+scripts_claude/
 
 # Visual Studio
 *.sln

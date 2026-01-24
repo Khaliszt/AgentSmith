@@ -5,41 +5,118 @@
 #include <sstream>
 #include <algorithm>
 
-// Windows uses _popen/_pclose instead of popen/pclose
 #ifdef PLATFORM_WINDOWS
-#define popen _popen
-#define pclose _pclose
+#include <windows.h>
 #endif
 
 namespace AgentSmith {
 
-std::string GitUtils::RunGitCommand(const std::string& directory, const std::string& args) {
-    std::string command = "cd \"" + directory + "\" && git " + args + " 2>/dev/null";
-    
 #ifdef PLATFORM_WINDOWS
-    command = "cd /d \"" + directory + "\" && git " + args + " 2>nul";
-#endif
-    
-    std::array<char, 256> buffer;
+// Windows implementation using CreateProcess with no console window
+std::string GitUtils::RunGitCommand(const std::string& directory, const std::string& args) {
     std::string result;
-    
-    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(command.c_str(), "r"), pclose);
-    
-    if (!pipe) {
+
+    // Build command line: cmd /c "cd /d "directory" && git args"
+    std::string cmdLine = "cmd /c \"cd /d \"" + directory + "\" && git " + args + " 2>nul\"";
+
+    // Create pipes for stdout
+    SECURITY_ATTRIBUTES sa = {};
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = nullptr;
+
+    HANDLE hStdOutRead = nullptr;
+    HANDLE hStdOutWrite = nullptr;
+
+    if (!CreatePipe(&hStdOutRead, &hStdOutWrite, &sa, 0)) {
         return "";
     }
-    
-    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
-        result += buffer.data();
+
+    // Ensure the read handle is not inherited
+    SetHandleInformation(hStdOutRead, HANDLE_FLAG_INHERIT, 0);
+
+    STARTUPINFOA si = {};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.hStdOutput = hStdOutWrite;
+    si.hStdError = hStdOutWrite;
+    si.hStdInput = nullptr;
+    si.wShowWindow = SW_HIDE;
+
+    PROCESS_INFORMATION pi = {};
+
+    // CREATE_NO_WINDOW prevents console window from appearing
+    BOOL success = CreateProcessA(
+        nullptr,
+        const_cast<char*>(cmdLine.c_str()),
+        nullptr,
+        nullptr,
+        TRUE,  // Inherit handles
+        CREATE_NO_WINDOW,
+        nullptr,
+        nullptr,
+        &si,
+        &pi
+    );
+
+    // Close write end of pipe (we only read)
+    CloseHandle(hStdOutWrite);
+
+    if (!success) {
+        CloseHandle(hStdOutRead);
+        return "";
     }
-    
+
+    // Read output from pipe
+    char buffer[256];
+    DWORD bytesRead;
+    while (ReadFile(hStdOutRead, buffer, sizeof(buffer) - 1, &bytesRead, nullptr) && bytesRead > 0) {
+        buffer[bytesRead] = '\0';
+        result += buffer;
+    }
+
+    // Wait for process to finish (with timeout to prevent hanging)
+    WaitForSingleObject(pi.hProcess, 5000);
+
+    // Cleanup
+    CloseHandle(hStdOutRead);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
     // Trim trailing newline
     while (!result.empty() && (result.back() == '\n' || result.back() == '\r')) {
         result.pop_back();
     }
-    
+
     return result;
 }
+
+#else
+// Unix implementation using popen
+std::string GitUtils::RunGitCommand(const std::string& directory, const std::string& args) {
+    std::string command = "cd \"" + directory + "\" && git " + args + " 2>/dev/null";
+
+    std::array<char, 256> buffer;
+    std::string result;
+
+    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(command.c_str(), "r"), pclose);
+
+    if (!pipe) {
+        return "";
+    }
+
+    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+        result += buffer.data();
+    }
+
+    // Trim trailing newline
+    while (!result.empty() && (result.back() == '\n' || result.back() == '\r')) {
+        result.pop_back();
+    }
+
+    return result;
+}
+#endif
 
 bool GitUtils::IsGitRepository(const std::string& directory) {
     std::string result = RunGitCommand(directory, "rev-parse --is-inside-work-tree");

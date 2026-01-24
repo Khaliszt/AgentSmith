@@ -77,12 +77,16 @@ target_link_libraries(imgui PUBLIC
     OpenGL::GL
 )
 
-# Main executable
-add_executable(agent_smith
+# Main executable (WIN32 = no console window on Windows)
+add_executable(agent_smith WIN32
     src/main.cpp
     src/app.cpp
-    src/agent_panel.cpp
-    src/agent_manager.cpp
+    src/agent_window.cpp
+    src/agents_tracker.cpp
+    src/conpty_terminal.cpp
+    src/terminal_buffer.cpp
+    src/input_manager.cpp
+    src/output_log.cpp
     src/terminal_embed.cpp
     src/git_utils.cpp
     src/config.cpp

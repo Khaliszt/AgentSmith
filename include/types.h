@@ -92,10 +92,19 @@ struct Agent {
     std::chrono::system_clock::time_point last_activity;
     int tokens_used = 0;
     int messages_sent = 0;
-    
+
+    // Session tracking (for embedded terminal)
+    std::chrono::system_clock::time_point session_start;
+    int tokens_remaining = -1;  // -1 = unknown
+    std::string project_name;
+    bool needs_attention = false;
+
+    // Per-agent settings (configurable via right-click)
+    bool auto_accept_edits = false;  // Default OFF for safety
+
     // File activity tracking (for future visualizer)
     std::vector<FileActivity> recent_files;
-    
+
     // Position in grid (for layout persistence)
     int grid_row = 0;
     int grid_col = 0;
