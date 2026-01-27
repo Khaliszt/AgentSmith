@@ -160,6 +160,8 @@ private:
 
     std::chrono::steady_clock::time_point m_startTime;
     std::chrono::steady_clock::time_point m_lastFrameTime;
+
+    std::string m_imguiIniPath;  // Stored to prevent dangling pointer
 };
 
 } // namespace smith::core

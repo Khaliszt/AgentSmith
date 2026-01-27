@@ -33,7 +33,7 @@ public:
     void Write(const LogEntry& entry) override;
     const char* GetName() const override { return "ImGui"; }
 
-    const std::deque<LogEntry>& GetEntries() const;
+    std::deque<LogEntry> GetEntries() const;
     void Clear();
 
 private:

@@ -94,9 +94,10 @@ bool AppBase::Initialize(const Config& config) {
     (void)config.enableDocking;
     (void)config.enableViewports;
 
-    // Set ImGui ini file path
+    // Set ImGui ini file path (store in member to prevent dangling pointer)
     if (!config.imguiIniPath.empty()) {
-        io.IniFilename = config.imguiIniPath.c_str();
+        m_imguiIniPath = config.imguiIniPath;
+        io.IniFilename = m_imguiIniPath.c_str();
     }
 
     // Setup platform/renderer bindings

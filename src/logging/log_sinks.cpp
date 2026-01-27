@@ -68,7 +68,8 @@ void ImGuiSink::Write(const LogEntry& entry) {
     }
 }
 
-const std::deque<LogEntry>& ImGuiSink::GetEntries() const {
+std::deque<LogEntry> ImGuiSink::GetEntries() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
     return m_entries;
 }
 
