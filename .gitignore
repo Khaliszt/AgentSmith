@@ -90,3 +90,9 @@ config.json
 *.tmp
 *.temp
 *.swp
+
+# ImGui state
+imgui.ini
+
+# Claude Code
+.claude/

@@ -36,9 +36,16 @@ void ConfigManager::SetDefaults() {
     m_config.default_shell = "zsh";
 #endif
     
-    m_config.theme.accent_r = 0.3f;
-    m_config.theme.accent_g = 0.7f;
-    m_config.theme.accent_b = 0.4f;
+    m_config.theme.accent = FColor(0.3f, 0.7f, 0.4f);
+
+    // Terminal theme defaults
+    m_config.default_terminal_theme = "Catppuccin Macchiato";
+    m_config.agent_themes.claude_code = "";
+    m_config.agent_themes.aider = "";
+    m_config.agent_themes.cursor = "";
+    m_config.agent_themes.chatgpt = "";
+    m_config.agent_themes.grok = "";
+    m_config.agent_themes.custom = "";
 }
 
 bool ConfigManager::Load(const std::string& filepath) {
@@ -80,17 +87,29 @@ bool ConfigManager::Load(const std::string& filepath) {
             auto& t = j["terminal"];
             if (t.contains("command")) m_config.default_terminal_command = t["command"];
             if (t.contains("shell")) m_config.default_shell = t["shell"];
+            if (t.contains("default_theme")) m_config.default_terminal_theme = t["default_theme"];
         }
-        
+
+        // Agent-type specific themes
+        if (j.contains("agent_themes")) {
+            auto& at = j["agent_themes"];
+            if (at.contains("claude_code")) m_config.agent_themes.claude_code = at["claude_code"];
+            if (at.contains("aider")) m_config.agent_themes.aider = at["aider"];
+            if (at.contains("cursor")) m_config.agent_themes.cursor = at["cursor"];
+            if (at.contains("chatgpt")) m_config.agent_themes.chatgpt = at["chatgpt"];
+            if (at.contains("grok")) m_config.agent_themes.grok = at["grok"];
+            if (at.contains("custom")) m_config.agent_themes.custom = at["custom"];
+        }
+
         // Theme
         if (j.contains("theme")) {
             auto& th = j["theme"];
             if (th.contains("accent")) {
                 auto& a = th["accent"];
                 if (a.is_array() && a.size() >= 3) {
-                    m_config.theme.accent_r = a[0];
-                    m_config.theme.accent_g = a[1];
-                    m_config.theme.accent_b = a[2];
+                    m_config.theme.accent.r = a[0];
+                    m_config.theme.accent.g = a[1];
+                    m_config.theme.accent.b = a[2];
                 }
             }
         }
@@ -115,7 +134,11 @@ bool ConfigManager::Load(const std::string& filepath) {
                         agent.args.push_back(arg);
                     }
                 }
-                
+
+                if (agent_json.contains("terminal_theme")) {
+                    agent.terminal_theme = agent_json["terminal_theme"];
+                }
+
                 m_config.agents.push_back(std::move(agent));
             }
         }
@@ -153,12 +176,23 @@ bool ConfigManager::Save(const std::string& filepath) {
     // Terminal settings
     j["terminal"] = {
         {"command", m_config.default_terminal_command},
-        {"shell", m_config.default_shell}
+        {"shell", m_config.default_shell},
+        {"default_theme", m_config.default_terminal_theme}
+    };
+
+    // Agent-type specific themes
+    j["agent_themes"] = {
+        {"claude_code", m_config.agent_themes.claude_code},
+        {"aider", m_config.agent_themes.aider},
+        {"cursor", m_config.agent_themes.cursor},
+        {"chatgpt", m_config.agent_themes.chatgpt},
+        {"grok", m_config.agent_themes.grok},
+        {"custom", m_config.agent_themes.custom}
     };
     
     // Theme
     j["theme"] = {
-        {"accent", {m_config.theme.accent_r, m_config.theme.accent_g, m_config.theme.accent_b}}
+        {"accent", {m_config.theme.accent.r, m_config.theme.accent.g, m_config.theme.accent.b}}
     };
     
     // Agents
@@ -173,6 +207,9 @@ bool ConfigManager::Save(const std::string& filepath) {
         agent_json["grid_row"] = agent.grid_row;
         agent_json["grid_col"] = agent.grid_col;
         agent_json["args"] = agent.args;
+        if (!agent.terminal_theme.empty()) {
+            agent_json["terminal_theme"] = agent.terminal_theme;
+        }
         j["agents"].push_back(agent_json);
     }
     

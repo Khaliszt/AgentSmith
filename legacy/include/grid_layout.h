@@ -34,11 +34,11 @@ public:
     void SetConfig(const GridConfig& config);
     GridConfig& GetConfig() { return m_config; }
 
-    // Update windows from agents
-    void SyncWithAgents(std::vector<Agent>& agents);
+    // Update windows from agents (takes vector of raw pointers)
+    void SyncWithAgents(const std::vector<Agent*>& agents);
 
     // Render the entire grid
-    void Render(const ImVec2& area_pos, const ImVec2& area_size);
+    void Render(const ImVec2& area_pos, const ImVec2& area_size, const FColor& accent_color);
 
     // Focus management
     void FocusPanel(int row, int col);

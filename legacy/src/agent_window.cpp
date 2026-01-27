@@ -1,4 +1,5 @@
 #include "agent_window.h"
+#include "agents_tracker.h"
 #include "git_utils.h"
 #include "output_log.h"
 #include <imgui.h>
@@ -88,6 +89,25 @@ void AgentWindow::SetAgent(Agent* agent) {
     if (m_buffer) {
         m_buffer->Clear();
     }
+
+    // Apply terminal theme
+    if (m_agent && m_buffer) {
+        ApplyTerminalTheme();
+    }
+}
+
+void AgentWindow::ApplyTerminalTheme() {
+    if (!m_agent || !m_buffer) return;
+
+    // Resolve theme: agent-specific > default
+    std::string themeName = m_agent->terminal_theme;
+    if (themeName.empty()) {
+        themeName = "Catppuccin Macchiato";  // Default theme
+    }
+
+    TerminalTheme theme = TerminalThemes::GetThemeByName(themeName);
+    m_buffer->SetTheme(theme);
+    LOG_DEBUG_SRC("Applied terminal theme: " + theme.name + " for agent: " + m_agent->name, "AgentWindow");
 }
 
 bool AgentWindow::Render(const ImVec2& pos, const ImVec2& size) {
@@ -151,11 +171,12 @@ bool AgentWindow::Render(const ImVec2& pos, const ImVec2& size) {
     // Calculate terminal region
     ImVec4 termRegion = GetTerminalRegion(pos, size);
 
-    // Terminal area background
+    // Terminal area background (use theme background)
+    uint32_t bgColor = m_buffer ? m_buffer->GetTheme().background : IM_COL32(15, 15, 18, 255);
     drawList->AddRectFilled(
         ImVec2(termRegion.x, termRegion.y),
         ImVec2(termRegion.x + termRegion.z, termRegion.y + termRegion.w),
-        IM_COL32(15, 15, 18, 255)
+        bgColor
     );
 
     if (!m_terminalLaunched) {
@@ -177,6 +198,27 @@ bool AgentWindow::Render(const ImVec2& pos, const ImVec2& size) {
             ImGui::SetKeyboardFocusHere(-1);
         }
 
+        // Handle mouse wheel scrolling when hovering over terminal
+        // Check mouse position manually since InvisibleButton may not capture wheel events properly
+        ImVec2 mouse = ImGui::GetMousePos();
+        bool mouseInTerminal = mouse.x >= termRegion.x && mouse.x <= termRegion.x + termRegion.z &&
+                               mouse.y >= termRegion.y && mouse.y <= termRegion.y + termRegion.w;
+
+        if (mouseInTerminal && m_buffer) {
+            float wheel = ImGui::GetIO().MouseWheel;
+            if (wheel != 0.0f) {
+                int scrollLines = static_cast<int>(wheel * 3);  // 3 lines per notch
+                int currentOffset = m_buffer->GetScrollOffset();
+                int newOffset = currentOffset + scrollLines;  // Positive wheel (up) = scroll up (increase offset)
+
+                // Clamp to valid range
+                int maxScroll = m_buffer->GetScrollbackSize();
+                newOffset = (std::max)(0, (std::min)(newOffset, maxScroll));
+
+                m_buffer->SetScrollOffset(newOffset);
+            }
+        }
+
         // Handle keyboard input when focused
         if (m_isFocused && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
             HandleKeyboardInput();
@@ -186,8 +228,8 @@ bool AgentWindow::Render(const ImVec2& pos, const ImVec2& size) {
         }
     }
 
-    // Context menu on right-click
-    if (ImGui::IsMouseClicked(1)) {
+    // Context menu on right-click (only if ImGui isn't capturing mouse)
+    if (!ImGui::GetIO().WantCaptureMouse && ImGui::IsMouseClicked(1)) {
         ImVec2 mouse = ImGui::GetMousePos();
         if (mouse.x >= pos.x && mouse.x <= pos.x + size.x &&
             mouse.y >= pos.y && mouse.y <= pos.y + size.y) {
@@ -199,6 +241,16 @@ bool AgentWindow::Render(const ImVec2& pos, const ImVec2& size) {
 
     if (m_showAgentInfo) {
         RenderAgentInfoPopup();
+    }
+
+    if (m_pendingRemoval) {
+        RenderRemoveConfirmDialog();
+    }
+
+    // Agent was removed - exit early
+    if (!m_agent) {
+        ImGui::PopID();
+        return false;
     }
 
     // Check if process exited
@@ -425,6 +477,20 @@ void AgentWindow::RenderContextMenu() {
             m_agent->auto_accept_edits = !m_agent->auto_accept_edits;
         }
 
+        // Terminal Theme submenu
+        if (ImGui::BeginMenu("Terminal Theme")) {
+            std::string currentTheme = m_buffer ? m_buffer->GetTheme().name : "";
+            auto themes = TerminalThemes::GetAllThemes();
+            for (const auto& theme : themes) {
+                bool isSelected = (theme.name == currentTheme);
+                if (ImGui::MenuItem(theme.name.c_str(), nullptr, isSelected)) {
+                    m_agent->terminal_theme = theme.name;
+                    ApplyTerminalTheme();
+                }
+            }
+            ImGui::EndMenu();
+        }
+
         ImGui::Separator();
 
         // Fullscreen toggle
@@ -461,12 +527,46 @@ void AgentWindow::RenderContextMenu() {
 #endif
         }
 
+        if (ImGui::MenuItem("Open in External Terminal")) {
+#ifdef PLATFORM_WINDOWS
+            // Try Windows Terminal first, fall back to PowerShell
+            std::string wtCmd = "wt.exe -d \"" + m_agent->working_directory + "\"";
+            if (!m_agent->command.empty()) {
+                wtCmd += " cmd /k \"" + m_agent->command;
+                for (const auto& arg : m_agent->args) {
+                    wtCmd += " " + arg;
+                }
+                wtCmd += "\"";
+            }
+
+            // Use CreateProcess to avoid blocking
+            STARTUPINFOA si = { sizeof(si) };
+            PROCESS_INFORMATION pi;
+            if (!CreateProcessA(nullptr, const_cast<char*>(wtCmd.c_str()), nullptr, nullptr, FALSE,
+                               CREATE_NEW_CONSOLE, nullptr, m_agent->working_directory.c_str(), &si, &pi)) {
+                // Windows Terminal not available, try PowerShell directly
+                std::string psCmd = "powershell.exe -NoExit -Command \"cd '" + m_agent->working_directory + "'";
+                if (!m_agent->command.empty()) {
+                    psCmd += "; " + m_agent->command;
+                    for (const auto& arg : m_agent->args) {
+                        psCmd += " " + arg;
+                    }
+                }
+                psCmd += "\"";
+                CreateProcessA(nullptr, const_cast<char*>(psCmd.c_str()), nullptr, nullptr, FALSE,
+                              CREATE_NEW_CONSOLE, nullptr, nullptr, &si, &pi);
+            }
+            if (pi.hProcess) CloseHandle(pi.hProcess);
+            if (pi.hThread) CloseHandle(pi.hThread);
+#endif
+        }
+
         ImGui::Separator();
 
         // Remove agent (dangerous)
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.3f, 0.3f, 1.0f));
         if (ImGui::MenuItem("Remove Agent")) {
-            // TODO: Signal removal to manager
+            m_pendingRemoval = true;
         }
         ImGui::PopStyleColor();
 
@@ -525,6 +625,9 @@ void AgentWindow::RenderAgentInfoPopup() {
         // Settings
         ImGui::Text("Auto-Accept: %s", m_agent->auto_accept_edits ? "ON" : "OFF");
         ImGui::Text("Status:      %s", GetStatusText(m_agent->status));
+        if (m_buffer) {
+            ImGui::Text("Theme:       %s", m_buffer->GetTheme().name.c_str());
+        }
 
         ImGui::Spacing();
 
@@ -533,6 +636,55 @@ void AgentWindow::RenderAgentInfoPopup() {
         }
     }
     ImGui::End();
+}
+
+void AgentWindow::RenderRemoveConfirmDialog() {
+    if (!m_agent) {
+        m_pendingRemoval = false;
+        return;
+    }
+
+    ImGui::OpenPopup("Confirm Remove Agent");
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(350, 150));
+
+    if (ImGui::BeginPopupModal("Confirm Remove Agent", nullptr, ImGuiWindowFlags_NoResize)) {
+        ImGui::TextWrapped("Are you sure you want to remove agent \"%s\"?", m_agent->name.c_str());
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(0.9f, 0.6f, 0.3f, 1.0f), "This will terminate the terminal session.");
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Remove", ImVec2(100, 30))) {
+            std::string agentId = m_agent->id;
+
+            // Terminate terminal first
+            if (m_terminal && m_terminalLaunched) {
+                m_terminal->Terminate();
+                m_terminalLaunched = false;
+            }
+
+            // Remove from tracker
+            AgentsTracker::Instance().RemoveAgent(agentId);
+
+            m_pendingRemoval = false;
+            m_agent = nullptr;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Button("Cancel", ImVec2(100, 30))) {
+            m_pendingRemoval = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
 }
 
 ImVec4 AgentWindow::GetTerminalRegion(const ImVec2& panelPos, const ImVec2& panelSize) const {
@@ -609,6 +761,13 @@ void AgentWindow::LaunchTerminal() {
         m_agent->pid = m_terminal->GetProcessId();
         m_agent->needs_attention = false;
         LOG_INFO_SRC("Terminal launched successfully, PID: " + std::to_string(m_agent->pid), "AgentWindow");
+
+        // Debug: Write test message directly to buffer to verify rendering works
+        if (m_buffer) {
+            const char* testMsg = "[DEBUG] Terminal buffer render test\r\n";
+            LOG_DEBUG_SRC("Writing test message to buffer", "AgentWindow");
+            m_buffer->ProcessInput(testMsg, strlen(testMsg));
+        }
     } else {
         m_agent->status = AgentStatus::Error;
         m_agent->status_message = "Failed to launch terminal";
@@ -634,6 +793,9 @@ void AgentWindow::RestartTerminal() {
     if (m_buffer) {
         m_buffer->Clear();
     }
+
+    // Re-apply theme (in case it changed)
+    ApplyTerminalTheme();
 
     LaunchTerminal();
 }
@@ -672,6 +834,11 @@ void AgentWindow::HandleKeyboardInput() {
 
     // Handle text input
     if (io.InputQueueCharacters.Size > 0) {
+        // Auto-scroll to bottom when user types
+        if (m_buffer && m_buffer->GetScrollOffset() > 0) {
+            m_buffer->ScrollToBottom();
+        }
+
         for (int i = 0; i < io.InputQueueCharacters.Size; ++i) {
             ImWchar ch = io.InputQueueCharacters[i];
             if (ch > 0 && ch < 0x10000 && ch != 127) {  // Exclude DEL
@@ -719,12 +886,27 @@ void AgentWindow::HandleKeyboardInput() {
         sendEscape("\x1b[F");
     }
 
-    // Page Up/Down
+    // Page Up/Down - Shift for scrollback, plain for terminal
     if (ImGui::IsKeyPressed(ImGuiKey_PageUp)) {
-        sendEscape("\x1b[5~");
+        if (io.KeyShift && m_buffer) {
+            // Shift+PageUp: scroll up through scrollback
+            int currentOffset = m_buffer->GetScrollOffset();
+            int newOffset = currentOffset + m_terminalRows;
+            int maxScroll = m_buffer->GetScrollbackSize();
+            m_buffer->SetScrollOffset((std::min)(newOffset, maxScroll));
+        } else {
+            sendEscape("\x1b[5~");
+        }
     }
     if (ImGui::IsKeyPressed(ImGuiKey_PageDown)) {
-        sendEscape("\x1b[6~");
+        if (io.KeyShift && m_buffer) {
+            // Shift+PageDown: scroll down through scrollback
+            int currentOffset = m_buffer->GetScrollOffset();
+            int newOffset = currentOffset - m_terminalRows;
+            m_buffer->SetScrollOffset((std::max)(0, newOffset));
+        } else {
+            sendEscape("\x1b[6~");
+        }
     }
 
     // Delete/Insert
@@ -801,6 +983,31 @@ void AgentWindow::HandleKeyboardInput() {
 
 void AgentWindow::OnTerminalOutput(const char* data, size_t length) {
     if (m_buffer) {
+        // Debug: Log first 200 chars of each output chunk
+        if (length > 0) {
+            std::string preview(data, (std::min)(length, size_t(200)));
+            // Replace non-printable chars with hex for logging
+            std::string safe;
+            for (char c : preview) {
+                if (c >= 32 && c < 127) {
+                    safe += c;
+                } else if (c == '\n') {
+                    safe += "\\n";
+                } else if (c == '\r') {
+                    safe += "\\r";
+                } else if (c == '\t') {
+                    safe += "\\t";
+                } else if (c == 0x1B) {
+                    safe += "\\e";
+                } else {
+                    char hex[8];
+                    snprintf(hex, sizeof(hex), "\\x%02X", (unsigned char)c);
+                    safe += hex;
+                }
+            }
+            // DEBUG: Uncomment to log terminal output (causes slowdown)
+            // LOG_DEBUG_SRC("Term output (" + std::to_string(length) + " bytes): " + safe, "Terminal");
+        }
         m_buffer->ProcessInput(data, length);
     }
 }

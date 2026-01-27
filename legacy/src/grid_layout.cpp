@@ -59,15 +59,15 @@ void GridLayout::ResizePanelGrid() {
     m_focused_col = (std::clamp)(m_focused_col, 0, m_config.cols - 1);
 }
 
-void GridLayout::SyncWithAgents(std::vector<Agent>& agents) {
+void GridLayout::SyncWithAgents(const std::vector<Agent*>& agents) {
     // Assign agents to windows in order
     size_t agent_idx = 0;
 
     for (int r = 0; r < m_config.rows && agent_idx < agents.size(); r++) {
         for (int c = 0; c < m_config.cols && agent_idx < agents.size(); c++) {
-            m_windows[r][c]->SetAgent(&agents[agent_idx]);
-            agents[agent_idx].grid_row = r;
-            agents[agent_idx].grid_col = c;
+            m_windows[r][c]->SetAgent(agents[agent_idx]);
+            agents[agent_idx]->grid_row = r;
+            agents[agent_idx]->grid_col = c;
             agent_idx++;
         }
     }
@@ -93,7 +93,7 @@ ImVec4 GridLayout::CalculatePanelBounds(int row, int col, const ImVec2& area_pos
     return ImVec4(x, y, panel_width, panel_height);
 }
 
-void GridLayout::Render(const ImVec2& area_pos, const ImVec2& area_size) {
+void GridLayout::Render(const ImVec2& area_pos, const ImVec2& area_size, const FColor& accent_color) {
     ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
 
     // Check for fullscreen window
@@ -111,11 +111,16 @@ void GridLayout::Render(const ImVec2& area_pos, const ImVec2& area_size) {
         ImVec2 pos(area_pos.x + padding.x, area_pos.y + padding.y);
         ImVec2 size(area_size.x - padding.x * 2, area_size.y - padding.y * 2);
 
-        // Border
+        // Border (use accent color)
         draw_list->AddRect(
             pos,
             ImVec2(pos.x + size.x, pos.y + size.y),
-            IM_COL32(60, 180, 90, 255),
+            IM_COL32(
+                static_cast<int>(accent_color.r * 255),
+                static_cast<int>(accent_color.g * 255),
+                static_cast<int>(accent_color.b * 255),
+                255
+            ),
             3.0f,
             0,
             2.0f
@@ -142,8 +147,15 @@ void GridLayout::Render(const ImVec2& area_pos, const ImVec2& area_size) {
             // Check if this window is focused
             bool is_focused = (r == m_focused_row && c == m_focused_col);
 
-            // Draw panel border
-            ImU32 border_color = is_focused ? IM_COL32(60, 180, 90, 255) : IM_COL32(50, 50, 55, 255);
+            // Draw panel border (use accent color for focused window)
+            ImU32 border_color = is_focused
+                ? IM_COL32(
+                    static_cast<int>(accent_color.r * 255),
+                    static_cast<int>(accent_color.g * 255),
+                    static_cast<int>(accent_color.b * 255),
+                    255
+                  )
+                : IM_COL32(50, 50, 55, 255);
             float border_thickness = is_focused ? 2.0f : 1.0f;
 
             draw_list->AddRect(
@@ -158,8 +170,12 @@ void GridLayout::Render(const ImVec2& area_pos, const ImVec2& area_size) {
             // Render window content
             m_windows[r][c]->Render(pos, size);
 
+            // Only handle clicks if ImGui doesn't want to capture the mouse
+            // (i.e., no popup/modal/window is capturing input)
+            bool imguiWantsMouse = ImGui::GetIO().WantCaptureMouse;
+
             // Handle click to focus
-            if (ImGui::IsMouseClicked(0)) {
+            if (!imguiWantsMouse && ImGui::IsMouseClicked(0)) {
                 ImVec2 mouse = ImGui::GetMousePos();
                 if (mouse.x >= pos.x && mouse.x <= pos.x + size.x &&
                     mouse.y >= pos.y && mouse.y <= pos.y + size.y) {
@@ -174,7 +190,7 @@ void GridLayout::Render(const ImVec2& area_pos, const ImVec2& area_size) {
             }
 
             // Handle double-click for fullscreen
-            if (ImGui::IsMouseDoubleClicked(0)) {
+            if (!imguiWantsMouse && ImGui::IsMouseDoubleClicked(0)) {
                 ImVec2 mouse = ImGui::GetMousePos();
                 if (mouse.x >= pos.x && mouse.x <= pos.x + size.x &&
                     mouse.y >= pos.y && mouse.y <= pos.y + size.y) {

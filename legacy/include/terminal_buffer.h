@@ -1,5 +1,6 @@
 #pragma once
 
+#include "types.h"
 #include <string>
 #include <vector>
 #include <deque>
@@ -84,6 +85,10 @@ public:
     // Clear the screen
     void Clear();
 
+    // Set terminal color theme
+    void SetTheme(const TerminalTheme& theme);
+    const TerminalTheme& GetTheme() const { return m_theme; }
+
     // Get terminal dimensions
     int GetCols() const { return m_cols; }
     int GetRows() const { return m_rows; }
@@ -157,8 +162,15 @@ private:
     std::string m_oscBuffer;
     char m_oscTerminator = '\0';
 
+    // UTF-8 decoding state
+    char32_t m_utf8Codepoint = 0;
+    int m_utf8Remaining = 0;  // Bytes remaining in current sequence
+
     // Threading
     std::mutex m_mutex;
+
+    // Color theme
+    TerminalTheme m_theme;
 
     // Internal methods
     void ProcessChar(char32_t ch);

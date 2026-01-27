@@ -54,8 +54,14 @@ private:
     // Render the about dialog
     void RenderAboutDialog();
 
+    // Render the clear agents confirmation dialog
+    void RenderClearAgentsDialog();
+
     // Handle global keyboard shortcuts
     void HandleGlobalShortcuts();
+
+    // Get the directory containing the executable
+    std::string GetExecutableDirectory();
 
     // Window and state
     GLFWwindow* m_window = nullptr;
@@ -73,6 +79,7 @@ private:
     bool m_show_about_dialog = false;
     bool m_show_demo_window = false;
     bool m_show_output_log = true;  // Auto-open for debugging
+    bool m_show_clear_agents_dialog = false;
 
     // Add agent dialog state
     char m_new_agent_name[128] = "New Agent";
@@ -82,6 +89,9 @@ private:
     // Timing
     float m_git_update_timer = 0.0f;
     float m_git_update_interval = 5.0f;  // Update git info every 5 seconds
+
+    // Config path (in executable directory)
+    std::string m_config_path;
 };
 
 } // namespace AgentSmith

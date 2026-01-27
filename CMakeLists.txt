@@ -47,26 +47,13 @@ target_link_libraries(imgui PUBLIC
 # === smith_lib - Static library with all v2.0 code ===
 
 add_library(smith_lib STATIC
-    # New v2.0 core
+    # Core framework
     src/core/app_base.cpp
     src/core/application.cpp
 
-    # New v2.0 logging
+    # Logging system
     src/logging/logger.cpp
     src/logging/log_sinks.cpp
-
-    # Existing v1.x code (will be migrated gradually)
-    src/app.cpp
-    src/agent_window.cpp
-    src/agents_tracker.cpp
-    src/conpty_terminal.cpp
-    src/terminal_buffer.cpp
-    src/input_manager.cpp
-    src/output_log.cpp
-    src/terminal_embed.cpp
-    src/git_utils.cpp
-    src/config.cpp
-    src/grid_layout.cpp
 )
 
 target_include_directories(smith_lib PUBLIC

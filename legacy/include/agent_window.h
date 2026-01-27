@@ -86,6 +86,7 @@ private:
     void RenderTerminalContent(const ImVec2& pos, const ImVec2& size);
     void RenderContextMenu();
     void RenderAgentInfoPopup();
+    void RenderRemoveConfirmDialog();
     void RenderLaunchButton(const ImVec2& pos, const ImVec2& size);
 
     // Calculate terminal region (excluding overlays)
@@ -100,6 +101,9 @@ private:
     // Update terminal size based on pixel dimensions
     void UpdateTerminalSize(int widthPx, int heightPx);
 
+    // Apply terminal theme based on agent settings
+    void ApplyTerminalTheme();
+
     // Agent data
     Agent* m_agent = nullptr;
 
@@ -112,6 +116,7 @@ private:
     bool m_terminalLaunched = false;
     bool m_isFullscreen = false;
     bool m_showAgentInfo = false;
+    bool m_pendingRemoval = false;
 
     // Character dimensions (monospace font)
     float m_charWidth = 8.0f;

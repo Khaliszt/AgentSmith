@@ -5,6 +5,7 @@
 #include <memory>
 #include <functional>
 #include <string>
+#include <algorithm>
 
 namespace AgentSmith {
 
@@ -37,9 +38,9 @@ public:
     void RemoveAgent(const std::string& agentId);
     void RemoveAgentByIndex(size_t index);
 
-    // Access agents
-    std::vector<Agent>& GetAgents() { return m_agents; }
-    const std::vector<Agent>& GetAgents() const { return m_agents; }
+    // Access agents (returns raw pointers for compatibility)
+    std::vector<Agent*> GetAgents();
+    std::vector<const Agent*> GetAgents() const;
     Agent* GetAgent(const std::string& id);
     Agent* GetAgentByIndex(size_t index);
     size_t GetAgentCount() const { return m_agents.size(); }
@@ -82,7 +83,7 @@ private:
     // Assign default command based on agent type
     void AssignDefaultCommand(Agent& agent);
 
-    std::vector<Agent> m_agents;
+    std::vector<std::unique_ptr<Agent>> m_agents;
 
     // Callbacks
     AgentAddedCallback m_addedCallback;

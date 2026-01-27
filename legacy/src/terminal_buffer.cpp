@@ -1,4 +1,5 @@
 #include "terminal_buffer.h"
+#include "output_log.h"
 #include <imgui.h>
 #include <algorithm>
 #include <cstring>
@@ -6,35 +7,24 @@
 
 namespace AgentSmith {
 
-// Standard ANSI colors (normal)
-static const uint32_t s_ansiColors[8] = {
-    0xFF000000,  // 0: Black
-    0xFF0000CD,  // 1: Red
-    0xFF00CD00,  // 2: Green
-    0xFF00CDCD,  // 3: Yellow
-    0xFFCD0000,  // 4: Blue
-    0xFFCD00CD,  // 5: Magenta
-    0xFFCDCD00,  // 6: Cyan
-    0xFFE5E5E5,  // 7: White
-};
-
-// Standard ANSI colors (bright)
-static const uint32_t s_ansiBrightColors[8] = {
-    0xFF7F7F7F,  // 8: Bright Black (Gray)
-    0xFF0000FF,  // 9: Bright Red
-    0xFF00FF00,  // 10: Bright Green
-    0xFF00FFFF,  // 11: Bright Yellow
-    0xFFFF0000,  // 12: Bright Blue
-    0xFFFF00FF,  // 13: Bright Magenta
-    0xFFFFFF00,  // 14: Bright Cyan
-    0xFFFFFFFF,  // 15: Bright White
-};
-
 TerminalBuffer::TerminalBuffer(int cols, int rows)
     : m_cols(cols), m_rows(rows) {
     m_screen.resize(rows, TerminalLine(cols));
     m_scrollBottom = rows;
+
+    // Set default theme
+    m_theme = TerminalThemes::CatppuccinMacchiato();
+
     ResetAttributes();
+}
+
+void TerminalBuffer::SetTheme(const TerminalTheme& theme) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_theme = theme;
+
+    // Update default attributes to use new theme colors
+    m_currentAttrs.fg_color = m_theme.foreground;
+    m_currentAttrs.bg_color = 0x00000000;  // Transparent (use theme bg in render)
 }
 
 TerminalBuffer::~TerminalBuffer() = default;
@@ -45,19 +35,54 @@ void TerminalBuffer::ProcessInput(const char* data, size_t length) {
     for (size_t i = 0; i < length; ++i) {
         unsigned char c = static_cast<unsigned char>(data[i]);
 
+        // Handle UTF-8 continuation bytes ONLY when in Normal state and expecting them
+        if (m_parserState == ParserState::Normal && m_utf8Remaining > 0) {
+            if ((c & 0xC0) == 0x80) {
+                // Valid continuation byte
+                m_utf8Codepoint = (m_utf8Codepoint << 6) | (c & 0x3F);
+                m_utf8Remaining--;
+                if (m_utf8Remaining == 0) {
+                    // Complete codepoint - output it
+                    PutChar(m_utf8Codepoint);
+                }
+                continue;
+            } else {
+                // Invalid continuation - reset and process this byte normally
+                m_utf8Remaining = 0;
+                m_utf8Codepoint = 0;
+            }
+        }
+
         switch (m_parserState) {
             case ParserState::Normal:
                 if (c == 0x1B) {  // ESC
+                    // Cancel any pending UTF-8 sequence
+                    m_utf8Remaining = 0;
+                    m_utf8Codepoint = 0;
                     m_parserState = ParserState::Escape;
                     m_escapeBuffer.clear();
                 } else if (c < 0x20) {
                     ProcessControlChar(static_cast<char>(c));
                 } else if (c < 0x80) {
-                    // Regular ASCII
+                    // Regular ASCII (0x20-0x7F)
                     PutChar(static_cast<char32_t>(c));
+                } else if ((c & 0xE0) == 0xC0) {
+                    // 2-byte UTF-8 sequence (110xxxxx)
+                    m_utf8Codepoint = c & 0x1F;
+                    m_utf8Remaining = 1;
+                } else if ((c & 0xF0) == 0xE0) {
+                    // 3-byte UTF-8 sequence (1110xxxx)
+                    m_utf8Codepoint = c & 0x0F;
+                    m_utf8Remaining = 2;
+                } else if ((c & 0xF8) == 0xF0) {
+                    // 4-byte UTF-8 sequence (11110xxx)
+                    m_utf8Codepoint = c & 0x07;
+                    m_utf8Remaining = 3;
+                } else if ((c & 0xC0) == 0x80) {
+                    // Unexpected continuation byte - ignore
                 } else {
-                    // UTF-8 multi-byte sequence (simplified - just pass through)
-                    PutChar(static_cast<char32_t>(c));
+                    // Invalid byte, show replacement character
+                    PutChar(0xFFFD);
                 }
                 break;
 
@@ -403,8 +428,8 @@ void TerminalBuffer::ProcessSGR(const std::vector<int>& params) {
                 }
             }
         } else if (p == 39) {
-            // Default foreground
-            m_currentAttrs.fg_color = 0xFFE0E0E0;
+            // Default foreground (use theme)
+            m_currentAttrs.fg_color = m_theme.foreground;
         } else if (p >= 40 && p <= 47) {
             // Background color
             m_currentAttrs.bg_color = AnsiColorToRGBA(p - 40, false);
@@ -469,6 +494,14 @@ void TerminalBuffer::PutChar(char32_t ch) {
         cell.fg_color = m_currentAttrs.fg_color;
         cell.bg_color = m_currentAttrs.bg_color;
         cell.attributes = m_currentAttrs.attributes;
+
+        // DEBUG: Uncomment to log first few characters stored (causes slowdown)
+        // static int charCount = 0;
+        // if (charCount < 20 && ch >= 32 && ch < 127) {
+        //     LOG_DEBUG_SRC("PutChar '" + std::string(1, static_cast<char>(ch)) + "' at (" +
+        //                   std::to_string(m_cursorX) + "," + std::to_string(m_cursorY) + ")", "TermBuf");
+        //     charCount++;
+        // }
     }
 
     m_cursorX++;
@@ -697,6 +730,8 @@ void TerminalBuffer::SetScrollRegion(int top, int bottom) {
 
 void TerminalBuffer::ResetAttributes() {
     m_currentAttrs = TerminalCell();
+    m_currentAttrs.fg_color = m_theme.foreground;
+    m_currentAttrs.bg_color = 0x00000000;  // Transparent (use theme bg)
 }
 
 void TerminalBuffer::Resize(int cols, int rows) {
@@ -790,19 +825,21 @@ void TerminalBuffer::ClampCursor() {
 
 uint32_t TerminalBuffer::AnsiColorToRGBA(int colorIndex, bool bright) {
     if (colorIndex < 0 || colorIndex > 7) {
-        return 0xFFE0E0E0;  // Default
+        return m_theme.foreground;  // Default to theme foreground
     }
-    return bright ? s_ansiBrightColors[colorIndex] : s_ansiColors[colorIndex];
+    // Use theme colors: 0-7 are normal, 8-15 are bright
+    int index = bright ? (colorIndex + 8) : colorIndex;
+    return m_theme.ansiColors[index];
 }
 
 uint32_t TerminalBuffer::Parse256Color(int index) {
     if (index < 0 || index > 255) {
-        return 0xFFE0E0E0;
+        return m_theme.foreground;
     }
 
     if (index < 16) {
-        // Standard colors
-        return index < 8 ? s_ansiColors[index] : s_ansiBrightColors[index - 8];
+        // Standard colors from theme
+        return m_theme.ansiColors[index];
     }
 
     if (index < 232) {
@@ -837,9 +874,24 @@ void TerminalBuffer::Render(ImDrawList* drawList, const ImVec2& pos, const ImVec
     int visibleRows = static_cast<int>(size.y / charHeight);
     int startRow = -m_scrollOffset;
 
-    // Draw background
-    drawList->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y),
-                            IM_COL32(15, 15, 18, 255));
+    // DEBUG: Uncomment to log render stats periodically (causes slowdown due to buffer scan)
+    // static bool loggedOnce = false;
+    // static int frameCount = 0;
+    // frameCount++;
+    // if (!loggedOnce || (frameCount % 300 == 0)) {
+    //     int charCount = 0;
+    //     for (int row = 0; row < m_rows; ++row) {
+    //         for (int col = 0; col < m_cols && col < static_cast<int>(m_screen[row].cells.size()); ++col) {
+    //             if (m_screen[row].cells[col].character > ' ') charCount++;
+    //         }
+    //     }
+    //     LOG_DEBUG_SRC("Render: size=(" + std::to_string(static_cast<int>(size.x)) + "," +
+    //                   std::to_string(static_cast<int>(size.y)) + ") charsInBuf=" + std::to_string(charCount), "TermBuf");
+    //     loggedOnce = true;
+    // }
+
+    // Draw background using theme color
+    drawList->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), m_theme.background);
 
     // Draw each visible line
     for (int screenRow = 0; screenRow < visibleRows; ++screenRow) {
