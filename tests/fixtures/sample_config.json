@@ -1,0 +1,16 @@
+{
+    "window": {
+        "width": 1920,
+        "height": 1080,
+        "maximized": false
+    },
+    "grid": {
+        "rows": 2,
+        "cols": 2
+    },
+    "terminal": {
+        "defaultTheme": "Catppuccin Macchiato",
+        "fontSize": 14
+    },
+    "agents": []
+}
