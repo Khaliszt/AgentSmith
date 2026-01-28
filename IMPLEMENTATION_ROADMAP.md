@@ -1436,11 +1436,113 @@ Create the terminal abstraction layer with ITerminal interface, implement WebVie
 
 ### Prerequisites
 - Phase 1 complete
+- Phase 2 complete
 - WebView2 SDK available via FetchContent
+
+### Pre-Phase 3 Setup Actions
+
+Before starting Phase 3 tasks, complete these setup actions:
+
+1. **Create resources directory:**
+   ```powershell
+   mkdir resources/web
+   ```
+
+2. **Update CMakeLists.txt for terminal sources:**
+   Add the following to smith_lib sources (will be done in Task 3.2):
+   - `src/terminal/conpty_terminal.cpp`
+   - `src/terminal/terminal_theme.cpp`
+   - `src/terminal/webview_terminal.cpp`
+   - `src/terminal/terminal_factory.cpp`
+
+3. **Verify WebView2 in Dependencies.cmake:**
+   WebView2 SDK should already be fetched via FetchContent (added in Phase 1).
 
 ---
 
-### Task 3.1: Create Terminal Interface
+### Architecture Note: ConPTY + xterm.js
+
+**IMPORTANT:** ConPTY and xterm.js serve different purposes and work together:
+
+| Component | Purpose |
+|-----------|---------|
+| **ConPTY** | Process management - launches CLI processes (claude, etc.), pipes I/O, handles resize signals |
+| **xterm.js** | Rendering - displays terminal output, handles ANSI colors/escape codes, captures keyboard input |
+
+**Data flow:**
+```
+User Keyboard → xterm.js (WebView) → ConPTY → CLI Process (claude)
+                     ↑                  │
+                     └──────────────────┘
+                       Process Output
+```
+
+xterm.js replaces our custom ANSI parser and ImGui renderer, but ConPTY is still required to actually run terminal-based processes.
+
+---
+
+### Task Dependency Graph
+
+```
+Task 3.0 (Expand ITerminal) ────┬────> Task 3.1 (Themes) ────> Task 3.2 (ConPTY)
+                                │                                      │
+                                └────> Task 3.3 (xterm.js resources)   │
+                                              │                        │
+                                              └────────┬───────────────┘
+                                                       │
+                                                       v
+                                               Task 3.4 (WebView)
+                                                       │
+                                                       v
+                                               Task 3.5 (Factory)
+                                                       │
+                                                       v
+                                               Task 3.6 (Provider Integration)
+                                                       │
+                                                       v
+                                               Phase 3 Complete
+```
+
+**Note:** Task 3.7 (ImGui Fallback) is **deferred** to Phase 5 since WebView2 is widely available on Windows 10+.
+
+---
+
+### Task 3.0: Expand ITerminal Interface (NEW - CRITICAL)
+
+**Complexity:** Medium
+**Estimated Time:** 2 hours
+**Blocks:** ALL other Phase 3 tasks
+**Depends On:** Phase 2
+
+**Problem:** The current `terminal/terminal_interface.h` is a minimal stub created in Phase 2 for ClaudeAgentProvider compatibility. It lacks critical methods from the architecture specification.
+
+**Current Interface (incomplete):**
+- `Write()`, `IsRunning()`, `SetOutputCallback()`, `Resize()`, `Clear()`, `GetSize()`
+
+**Missing Methods (must add):**
+- Process lifecycle: `Launch()`, `Terminate()`, `GetExitCode()`, `GetProcessId()`
+- Callbacks: `SetExitCallback()`, `SetErrorCallback()`
+- Window management: `GetNativeHandle()`, `SetBounds()`, `SetVisible()`, `Focus()`
+- Clipboard: `GetSelectedText()`, `SelectAll()`, `Copy()`, `Paste()`
+- Scrolling: `ScrollUp()`, `ScrollDown()`, `ScrollToTop()`, `ScrollToBottom()`
+- Theme: `SetTheme()`, `GetTheme()`
+
+**Files to Modify:**
+
+#### `include/terminal/terminal_interface.h`
+Expand to match architecture document section 9.1 (full ITerminal interface).
+
+**Acceptance Criteria:**
+- [ ] All methods from architecture spec present
+- [ ] Process lifecycle methods defined
+- [ ] Callback types for exit/error handling
+- [ ] Native window handle support for WebView2
+- [ ] Selection and clipboard support
+- [ ] Compiles without errors
+
+---
+
+### Task 3.1: Create Terminal Theme System
 
 **Complexity:** Medium
 **Estimated Time:** 2 hours
@@ -1506,28 +1608,34 @@ private:
 
 ---
 
-### Task 3.2: Adapt Existing ConPTY Terminal
+### Task 3.2: Migrate and Adapt ConPTY Terminal
 
-**Complexity:** Medium
-**Estimated Time:** 3 hours
-**Depends On:** Task 3.1
+**Complexity:** Medium-High
+**Estimated Time:** 4 hours
+**Depends On:** Tasks 3.0, 3.1
 
-**Files to Modify:**
+**Why ConPTY is Still Needed:**
+ConPTY handles process management (launching `claude` CLI, piping I/O). xterm.js only handles rendering. They work together - ConPTY provides the PTY backend, xterm.js provides the display frontend.
 
-#### `include/terminal/conpty_terminal.h`
-Rename/move from `include/conpty_terminal.h` and implement ITerminal interface.
+**Files to Migrate:**
 
-#### `src/terminal/conpty_terminal.cpp`
-Move from `src/conpty_terminal.cpp` and adapt to ITerminal.
+#### From `legacy/` to new structure:
+- `legacy/include/conpty_terminal.h` → `include/terminal/conpty_terminal.h`
+- `legacy/src/conpty_terminal.cpp` → `src/terminal/conpty_terminal.cpp`
 
 **Key Changes:**
-1. Inherit from ITerminal
-2. Implement all required methods
-3. Keep existing ConPTY functionality
-4. Add theme support (stored but minimal rendering changes)
+1. Inherit from ITerminal (implement full interface from Task 3.0)
+2. Add `Launch()` method for process creation (replaces direct constructor launch)
+3. Add exit callback support
+4. Add theme support (store theme, pass to WebView via callbacks)
+5. Implement all ITerminal methods
+6. Update CMakeLists.txt to include new sources and link `kernel32` for ConPTY APIs
 
 **Acceptance Criteria:**
-- [ ] ConPTYTerminal implements ITerminal
+- [ ] ConPTYTerminal implements full ITerminal interface
+- [ ] `Launch()` method creates process attached to PTY
+- [ ] Exit callbacks fire when process terminates
+- [ ] Theme can be set and retrieved
 - [ ] Existing terminal functionality preserved
 - [ ] Compiles and links correctly
 
@@ -1684,8 +1792,17 @@ Write-Host "xterm.js resources downloaded to $webDir"
 ### Task 3.4: Implement WebViewTerminal
 
 **Complexity:** Very High
-**Estimated Time:** 8 hours
-**Depends On:** Tasks 3.1, 3.2, 3.3
+**Estimated Time:** 10 hours (increased from 8)
+**Depends On:** Tasks 3.0, 3.1, 3.2, 3.3
+
+**Architecture:**
+WebViewTerminal combines WebView2 (for xterm.js rendering) with ConPTY (for process I/O):
+```
+WebViewTerminal
+├── WebView2 Controller (renders xterm.js)
+├── ConPTYTerminal (manages process I/O)
+└── JavaScript Bridge (connects the two)
+```
 
 **Files to Create:**
 
@@ -1695,33 +1812,39 @@ As specified in architecture document section 9.2.
 #### `src/terminal/webview_terminal.cpp`
 
 **Key Implementation Challenges:**
-1. WebView2 COM initialization
-2. Async initialization (callback-based)
-3. JavaScript bridge for bidirectional communication
-4. Coordinate system mapping (GLFW -> Win32)
-5. Thread safety for output buffering
+1. WebView2 COM initialization (async, callback-based)
+2. JavaScript bridge for bidirectional communication
+3. ConPTY integration - route output to xterm.js, input from xterm.js to ConPTY
+4. Coordinate system mapping (GLFW -> Win32 for WebView2 positioning)
+5. Thread safety for output buffering between ConPTY read thread and WebView2
 
 **Implementation Order:**
 1. Basic WebView2 creation and initialization
-2. Load terminal.html
-3. Implement Write() -> JavaScript
-4. Implement input callback (JavaScript -> C++)
-5. Implement resize handling
-6. Implement theme switching
-7. Add selection support
+2. Load terminal.html from resources/web/
+3. Implement Write() -> JavaScript (`window.terminalApi.write()`)
+4. Implement input callback (JavaScript `postMessage` -> C++ -> ConPTY)
+5. Integrate ConPTY for process management
+6. Implement resize handling (both WebView2 and ConPTY)
+7. Implement theme switching
+8. Add selection/clipboard support
 
 **Acceptance Criteria:**
 - [ ] WebView2 initializes successfully
-- [ ] terminal.html loads
-- [ ] Write() displays in xterm.js
-- [ ] User input reaches ConPTY
-- [ ] Terminal resizes correctly
-- [ ] Themes can be changed
+- [ ] terminal.html loads from resources/web/
+- [ ] Write() displays text in xterm.js
+- [ ] User input from xterm.js reaches ConPTY process
+- [ ] Process output from ConPTY displays in xterm.js
+- [ ] Terminal resizes correctly (both WebView2 and PTY)
+- [ ] Themes can be changed at runtime
+- [ ] Copy/paste works
 
 **Integration Test:**
-- Launch process, verify output displays
-- Type input, verify process receives it
-- Resize window, verify terminal adjusts
+1. Create WebViewTerminal
+2. Launch `cmd.exe` or `powershell.exe` via ConPTY
+3. Verify prompt displays in xterm.js
+4. Type commands, verify they execute
+5. Resize window, verify terminal adjusts
+6. Test copy/paste functionality
 
 ---
 
@@ -1774,30 +1897,50 @@ std::unique_ptr<ITerminal> TerminalFactory::Create(TerminalBackend backend, ...)
 
 ---
 
-### Task 3.6: Adapt Existing TerminalBuffer as Fallback
+### Task 3.6: Update ClaudeAgentProvider Integration (NEW)
 
 **Complexity:** Medium
 **Estimated Time:** 2 hours
-**Depends On:** Task 3.1
+**Depends On:** Tasks 3.2, 3.5
+
+**Problem:** ClaudeAgentProvider currently expects the terminal to already be running. It needs to be updated to use the new `Launch()` method and handle terminal lifecycle properly.
 
 **Files to Modify:**
 
-Move and adapt `include/terminal_buffer.h` to `include/terminal/terminal_buffer.h`
+#### `include/agent/providers/claude_provider.h`
+- Update terminal integration to use `Launch()`
 
-Create `include/terminal/imgui_terminal.h`:
-```cpp
-// Wrapper that uses ConPTY + TerminalBuffer for ImGui rendering
-class ImGuiTerminal : public ITerminal {
-    // Uses TerminalBuffer for ANSI parsing
-    // Renders via ImGui
-};
-```
+#### `src/agent/providers/claude_provider.cpp`
+- Call `terminal->Launch()` in `Start()` method
+- Handle exit callback to detect process termination
+- Wire up theme support
+
+**Key Changes:**
+1. In `Start()`: Call `m_terminal->Launch(command, args, workingDir, cols, rows)`
+2. Set exit callback to transition to `AgentStatus::Stopped` when process exits
+3. Set error callback for terminal errors
+4. Pass theme from agent config to terminal
 
 **Acceptance Criteria:**
-- [ ] ImGuiTerminal implements ITerminal
-- [ ] Uses existing TerminalBuffer for parsing
-- [ ] Renders correctly in ImGui
-- [ ] Serves as fallback when WebView2 unavailable
+- [ ] ClaudeAgentProvider uses `Launch()` to start process
+- [ ] Exit callback properly transitions agent status
+- [ ] Theme is applied from agent configuration
+- [ ] Agent can be started, stopped, and restarted
+
+---
+
+### Task 3.7: Adapt Existing TerminalBuffer as Fallback (DEFERRED)
+
+**Status:** DEFERRED TO PHASE 5
+
+**Rationale:** WebView2 is available on Windows 10 version 1803+ and all Windows 11 systems. The ImGui fallback is a nice-to-have but not critical for initial v2.0 release. Deferring this allows focus on the primary WebView2 implementation.
+
+**When to Implement:** Phase 5 (Polish & Testing) or if WebView2 issues are discovered during testing.
+
+**Scope When Implemented:**
+- Move `legacy/terminal_buffer.h/.cpp` to `include/terminal/` and `src/terminal/`
+- Create `ImGuiTerminal` wrapper implementing ITerminal
+- Integrate with TerminalFactory as fallback option
 
 ---
 
@@ -1805,21 +1948,29 @@ class ImGuiTerminal : public ITerminal {
 
 Before proceeding to Phase 4, verify:
 
-- [ ] ITerminal interface implemented by both backends
-- [ ] WebView2Terminal initializes on supported systems
-- [ ] ImGuiTerminal works as fallback
-- [ ] Factory auto-selects appropriate backend
+- [ ] ITerminal interface fully expanded (Task 3.0)
+- [ ] Terminal themes work (Task 3.1)
+- [ ] ConPTYTerminal migrated and implements ITerminal (Task 3.2)
+- [ ] xterm.js resources downloaded and bundled (Task 3.3)
+- [ ] WebViewTerminal initializes and renders via xterm.js (Task 3.4)
+- [ ] TerminalFactory auto-selects WebView2 (Task 3.5)
+- [ ] ClaudeAgentProvider uses new terminal interface (Task 3.6)
 - [ ] Terminal displays process output correctly
 - [ ] User input reaches process
 - [ ] Terminal resizes correctly
-- [ ] xterm.js resources bundled
+- [ ] Copy/paste works
 
 **Validation Test:**
 1. Run application
-2. Create agent with Claude Code
-3. Verify terminal displays correctly
-4. Type commands, verify response
-5. Resize window, verify terminal adjusts
+2. Create agent with Claude Code type
+3. Verify WebView2 + xterm.js terminal displays correctly
+4. Type commands, verify they reach claude CLI
+5. Verify `/cost` output is parsed and metrics updated
+6. Resize window, verify terminal adjusts
+7. Test copy/paste functionality
+8. Stop and restart agent, verify lifecycle works
+
+**Note:** ImGui fallback (Task 3.7) is deferred to Phase 5.
 
 ---
 
