@@ -54,6 +54,13 @@ add_library(smith_lib STATIC
     # Logging system
     src/logging/logger.cpp
     src/logging/log_sinks.cpp
+
+    # Agent system (Phase 2)
+    src/agent/agent.cpp
+    src/agent/agent_utils.cpp
+    src/agent/agent_registry.cpp
+    src/agent/agent_tracker.cpp
+    src/agent/providers/claude_provider.cpp
 )
 
 target_include_directories(smith_lib PUBLIC
