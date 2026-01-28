@@ -2,6 +2,8 @@
 
 #include "agent/providers/claude_provider.h"
 #include "agent/agent.h"
+#include "terminal/terminal_factory.h"
+#include "terminal/terminal_theme.h"
 #include "logging/logger.h"
 #include "logging/log_macros.h"
 #include <algorithm>
@@ -46,15 +48,65 @@ core::Result<void> ClaudeAgentProvider::Initialize(const Agent& agent) {
 core::Result<void> ClaudeAgentProvider::Start() {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
+    // Create terminal via factory if not already set
     if (!m_terminal) {
-        return core::Result<void>(core::Error(core::Error::Code::InvalidArgument,
-                                              "Terminal not set - call SetTerminal() first"));
+        SMITH_INFO(logging::Category::Agent, "Creating terminal for Claude Code agent: {}", m_config.name);
+
+        // Create terminal using the factory (auto-selects best available backend)
+#ifdef _WIN32
+        // Get parent window handle if available (for WebView2)
+        // Note: This would ideally come from the Application or UI system
+        HWND parentHwnd = nullptr; // TODO: Get from UI context if needed
+        m_terminal = terminal::TerminalFactory::Create(terminal::TerminalBackend::Auto, parentHwnd);
+#else
+        m_terminal = terminal::TerminalFactory::Create(terminal::TerminalBackend::Auto, nullptr);
+#endif
+
+        if (!m_terminal) {
+            return core::Result<void>(core::Error(core::Error::Code::SystemError,
+                                                  "Failed to create terminal"));
+        }
     }
 
-    // Start the terminal (which launches the process)
+    // Set exit callback to transition agent to Stopped status
+    m_terminal->SetExitCallback([this](int exitCode) {
+        SMITH_INFO(logging::Category::Agent, "Claude Code agent {} exited with code: {}",
+                   m_config.name, exitCode);
+        SetStatus(AgentStatus::Stopped);
+    });
+
+    // Set error callback for terminal errors
+    m_terminal->SetErrorCallback([this](const std::string& error) {
+        SMITH_ERROR(logging::Category::Agent, "Terminal error for agent {}: {}",
+                    m_config.name, error);
+        SetStatus(AgentStatus::Error);
+    });
+
+    // Apply theme from agent configuration (use default if not specified)
+    terminal::TerminalTheme theme = terminal::TerminalTheme::GetDefault();
+    m_terminal->SetTheme(theme);
+
+    // Launch the Claude process via terminal
     if (!m_terminal->IsRunning()) {
-        // Terminal should handle launching the process
-        SMITH_INFO(logging::Category::Agent, "Starting Claude Code agent: {}", m_config.name);
+        SMITH_INFO(logging::Category::Agent, "Launching Claude Code agent: {}", m_config.name);
+
+        // Default dimensions if not specified
+        int cols = 120;
+        int rows = 30;
+
+        // Launch the process
+        bool launched = m_terminal->Launch(
+            m_config.command,
+            m_config.args,
+            m_config.workingDirectory,
+            cols,
+            rows
+        );
+
+        if (!launched) {
+            return core::Result<void>(core::Error(core::Error::Code::SystemError,
+                                                  "Failed to launch Claude Code process"));
+        }
     }
 
     SetStatus(AgentStatus::Starting);
@@ -69,13 +121,17 @@ core::Result<void> ClaudeAgentProvider::Stop() {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
     if (m_terminal) {
-        // Clear callbacks before stopping to prevent dangling invocations
-        m_terminal->SetOutputCallback(nullptr);
-
         if (m_terminal->IsRunning()) {
             SMITH_INFO(logging::Category::Agent, "Stopping Claude Code agent: {}", m_config.name);
-            // Terminal will handle process termination
+
+            // Terminate the process
+            m_terminal->Terminate();
         }
+
+        // Clear callbacks after stopping to prevent dangling invocations
+        m_terminal->SetOutputCallback(nullptr);
+        m_terminal->SetExitCallback(nullptr);
+        m_terminal->SetErrorCallback(nullptr);
     }
 
     SetStatus(AgentStatus::Stopped);

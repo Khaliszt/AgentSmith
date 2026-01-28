@@ -6,6 +6,7 @@ enable_testing()
 add_executable(agent_smith_tests
     tests/test_main.cpp
     # Unit tests will be added here as they're created
+    tests/unit/terminal/test_conpty_terminal.cpp
 )
 
 target_include_directories(agent_smith_tests PRIVATE

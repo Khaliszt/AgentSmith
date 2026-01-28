@@ -4,6 +4,7 @@
 
 #include "agent/agent_provider.h"
 #include "terminal/terminal_interface.h"
+#include "terminal/terminal_factory.h"
 #include <memory>
 #include <string>
 #include <regex>

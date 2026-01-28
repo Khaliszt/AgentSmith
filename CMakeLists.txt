@@ -61,6 +61,12 @@ add_library(smith_lib STATIC
     src/agent/agent_registry.cpp
     src/agent/agent_tracker.cpp
     src/agent/providers/claude_provider.cpp
+
+    # Terminal system (Phase 3)
+    src/terminal/terminal_theme.cpp
+    src/terminal/conpty_terminal.cpp
+    src/terminal/webview_terminal.cpp
+    src/terminal/terminal_factory.cpp
 )
 
 target_include_directories(smith_lib PUBLIC
@@ -74,19 +80,33 @@ target_link_libraries(smith_lib PUBLIC
 )
 
 # Platform-specific linking for library
-if(PLATFORM_WINDOWS)
+if(WIN32)
     target_link_libraries(smith_lib PUBLIC
         dwmapi
         user32
         shell32
+        kernel32  # Required for ConPTY APIs
+        ole32     # Required for COM (WebView2)
+        oleaut32  # Required for COM (WebView2)
     )
-elseif(PLATFORM_LINUX)
+
+    # Add WebView2 SDK if available
+    if(SMITH_USE_WEBVIEW2)
+        target_include_directories(smith_lib PUBLIC
+            ${webview2_SOURCE_DIR}/build/native/include
+            ${wil_SOURCE_DIR}/include
+        )
+        target_link_libraries(smith_lib PUBLIC
+            ${webview2_SOURCE_DIR}/build/native/x64/WebView2LoaderStatic.lib
+        )
+    endif()
+elseif(UNIX AND NOT APPLE)
     find_package(X11 REQUIRED)
     target_link_libraries(smith_lib PUBLIC
         ${X11_LIBRARIES}
         pthread
     )
-elseif(PLATFORM_MACOS)
+elseif(APPLE)
     target_link_libraries(smith_lib PUBLIC
         "-framework Cocoa"
         "-framework AppKit"
