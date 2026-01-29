@@ -20,6 +20,7 @@ find_package(OpenGL REQUIRED)
 # Include cmake modules
 include(cmake/CompilerFlags.cmake)
 include(cmake/Dependencies.cmake)
+include(cmake/Version.cmake)
 
 # Dependencies are now loaded from cmake/Dependencies.cmake
 
@@ -71,6 +72,7 @@ add_library(smith_lib STATIC
 
 target_include_directories(smith_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_BINARY_DIR}/generated
 )
 
 target_link_libraries(smith_lib PUBLIC

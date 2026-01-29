@@ -1,6 +1,7 @@
 // C:\FarfadetsCorp\AgentSmith\src\core\application.cpp
 
 #include "core/application.h"
+#include "core/version.h"
 #include "logging/logger.h"
 #include "logging/log_sink.h"
 #include "logging/log_macros.h"
@@ -26,7 +27,7 @@ int Application::Main(int argc, char** argv) {
     Application& app = Instance();
 
     AppBase::Config config;
-    config.title = "AgentSmith v2.0";
+    config.title = std::string("AgentSmith ") + VERSION_FULL;
     config.width = 1920;
     config.height = 1080;
     config.maximized = true;
@@ -43,7 +44,7 @@ bool Application::OnStartUp() {
     DiscoverPaths();
     InitializeLogging();
 
-    SMITH_INFO(logging::Category::Core, "AgentSmith v2.0 starting");
+    SMITH_INFO(logging::Category::Core, "AgentSmith {} starting", VERSION_FULL);
     SMITH_INFO(logging::Category::Core, "Executable directory: {}", m_exeDir);
     SMITH_INFO(logging::Category::Core, "Resources directory: {}", m_resourcesDir);
     SMITH_INFO(logging::Category::Core, "Config path: {}", m_configPath);
@@ -88,7 +89,8 @@ void Application::OnImGuiRender() {
 
     // Main content window
     ImGui::Begin("AgentSmith", nullptr, ImGuiWindowFlags_NoCollapse);
-    ImGui::Text("AgentSmith v2.0 - Phase 1: Foundation");
+    ImGui::Text("AgentSmith %s", VERSION_FULL);
+    ImGui::TextDisabled("Branch: %s | Built: %s", GIT_BRANCH, BUILD_TIMESTAMP);
     ImGui::Separator();
     ImGui::Text("Logging system: Active");
     ImGui::Text("AppBase framework: Active");
