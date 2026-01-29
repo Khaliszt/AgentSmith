@@ -75,6 +75,43 @@
         }
     };
 
+    // Handle messages from C++ (safer than ExecuteScript for data)
+    window.chrome.webview.addEventListener('message', function(event) {
+        const msg = event.data;
+        if (!msg || !msg.type) return;
+
+        switch (msg.type) {
+            case 'write':
+                terminal.write(msg.data || '');
+                break;
+            case 'clear':
+                terminal.clear();
+                break;
+            case 'reset':
+                terminal.reset();
+                break;
+            case 'setTheme':
+                if (msg.theme) {
+                    terminal.options.theme = msg.theme;
+                }
+                break;
+            case 'focus':
+                terminal.focus();
+                break;
+            case 'resize':
+                if (msg.cols && msg.rows) {
+                    terminal.resize(msg.cols, msg.rows);
+                }
+                break;
+            case 'scrollToBottom':
+                terminal.scrollToBottom();
+                break;
+            case 'scrollToTop':
+                terminal.scrollToTop();
+                break;
+        }
+    });
+
     // Notify C++ that terminal is ready
     window.chrome.webview.postMessage({ type: 'ready' });
 })();

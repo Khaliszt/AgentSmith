@@ -26,10 +26,29 @@ ConPTYTerminal::~ConPTYTerminal() {
 }
 
 ConPTYTerminal::ConPTYTerminal(ConPTYTerminal&& other) noexcept {
+    // CRITICAL: Stop source terminal's read thread first to prevent race condition
+    // The read thread may be using callbacks while we're moving them
+    other.m_running = false;
+
 #ifdef _WIN32
+    // Close pipe to unblock ReadFile in the read thread
+    if (other.m_hPipeOut != INVALID_HANDLE_VALUE) {
+        CloseHandle(other.m_hPipeOut);
+        other.m_hPipeOut = INVALID_HANDLE_VALUE;
+    }
+#endif
+
+    // Now safe to join the read thread
+    if (other.m_readThread && other.m_readThread->joinable()) {
+        other.m_readThread->join();
+    }
+    other.m_readThread.reset();
+
+#ifdef _WIN32
+    // Now safe to move handles
     m_hPC = other.m_hPC;
     m_hPipeIn = other.m_hPipeIn;
-    m_hPipeOut = other.m_hPipeOut;
+    m_hPipeOut = INVALID_HANDLE_VALUE;  // Already closed above
     m_hProcess = other.m_hProcess;
     m_hThread = other.m_hThread;
     m_processId = other.m_processId;
@@ -37,20 +56,21 @@ ConPTYTerminal::ConPTYTerminal(ConPTYTerminal&& other) noexcept {
 
     other.m_hPC = INVALID_HANDLE_VALUE;
     other.m_hPipeIn = INVALID_HANDLE_VALUE;
-    other.m_hPipeOut = INVALID_HANDLE_VALUE;
     other.m_hProcess = INVALID_HANDLE_VALUE;
     other.m_hThread = INVALID_HANDLE_VALUE;
     other.m_processId = 0;
     other.m_exitCode = 0;
 #endif
 
-    m_running.store(other.m_running.load());
-    other.m_running = false;
+    m_running.store(false);  // Terminal is stopped after move
 
-    m_readThread = std::move(other.m_readThread);
-    m_outputCallback = std::move(other.m_outputCallback);
-    m_exitCallback = std::move(other.m_exitCallback);
-    m_errorCallback = std::move(other.m_errorCallback);
+    // Safe to move callbacks now that read thread is stopped
+    {
+        std::lock_guard<std::mutex> lock(other.m_callbackMutex);
+        m_outputCallback = std::move(other.m_outputCallback);
+        m_exitCallback = std::move(other.m_exitCallback);
+        m_errorCallback = std::move(other.m_errorCallback);
+    }
     m_cols = other.m_cols;
     m_rows = other.m_rows;
     m_theme = other.m_theme;
@@ -58,12 +78,31 @@ ConPTYTerminal::ConPTYTerminal(ConPTYTerminal&& other) noexcept {
 
 ConPTYTerminal& ConPTYTerminal::operator=(ConPTYTerminal&& other) noexcept {
     if (this != &other) {
+        // First terminate our own terminal
         Terminate();
 
+        // CRITICAL: Stop source terminal's read thread first
+        other.m_running = false;
+
 #ifdef _WIN32
+        // Close pipe to unblock ReadFile
+        if (other.m_hPipeOut != INVALID_HANDLE_VALUE) {
+            CloseHandle(other.m_hPipeOut);
+            other.m_hPipeOut = INVALID_HANDLE_VALUE;
+        }
+#endif
+
+        // Join read thread
+        if (other.m_readThread && other.m_readThread->joinable()) {
+            other.m_readThread->join();
+        }
+        other.m_readThread.reset();
+
+#ifdef _WIN32
+        // Now safe to move handles
         m_hPC = other.m_hPC;
         m_hPipeIn = other.m_hPipeIn;
-        m_hPipeOut = other.m_hPipeOut;
+        m_hPipeOut = INVALID_HANDLE_VALUE;
         m_hProcess = other.m_hProcess;
         m_hThread = other.m_hThread;
         m_processId = other.m_processId;
@@ -71,20 +110,21 @@ ConPTYTerminal& ConPTYTerminal::operator=(ConPTYTerminal&& other) noexcept {
 
         other.m_hPC = INVALID_HANDLE_VALUE;
         other.m_hPipeIn = INVALID_HANDLE_VALUE;
-        other.m_hPipeOut = INVALID_HANDLE_VALUE;
         other.m_hProcess = INVALID_HANDLE_VALUE;
         other.m_hThread = INVALID_HANDLE_VALUE;
         other.m_processId = 0;
         other.m_exitCode = 0;
 #endif
 
-        m_running.store(other.m_running.load());
-        other.m_running = false;
+        m_running.store(false);
 
-        m_readThread = std::move(other.m_readThread);
-        m_outputCallback = std::move(other.m_outputCallback);
-        m_exitCallback = std::move(other.m_exitCallback);
-        m_errorCallback = std::move(other.m_errorCallback);
+        // Safe to move callbacks
+        {
+            std::lock_guard<std::mutex> lock(other.m_callbackMutex);
+            m_outputCallback = std::move(other.m_outputCallback);
+            m_exitCallback = std::move(other.m_exitCallback);
+            m_errorCallback = std::move(other.m_errorCallback);
+        }
         m_cols = other.m_cols;
         m_rows = other.m_rows;
         m_theme = other.m_theme;
@@ -424,6 +464,11 @@ void ConPTYTerminal::ReadThreadFunc() {
 }
 
 void ConPTYTerminal::CleanupHandles() {
+    // Close pseudo console handle if not already closed
+    if (m_hPC != INVALID_HANDLE_VALUE) {
+        ClosePseudoConsole(m_hPC);
+        m_hPC = INVALID_HANDLE_VALUE;
+    }
     if (m_hPipeIn != INVALID_HANDLE_VALUE) {
         CloseHandle(m_hPipeIn);
         m_hPipeIn = INVALID_HANDLE_VALUE;
@@ -444,25 +489,39 @@ void ConPTYTerminal::CleanupHandles() {
 }
 
 void ConPTYTerminal::InvokeOutputCallback(const char* data, size_t length) {
-    std::lock_guard<std::mutex> lock(m_callbackMutex);
-    if (m_outputCallback) {
-        // Convert to string for callback
+    // Copy callback under lock, invoke outside to prevent deadlock
+    OutputCallback callback;
+    {
+        std::lock_guard<std::mutex> lock(m_callbackMutex);
+        callback = m_outputCallback;
+    }
+    if (callback) {
         std::string text(data, length);
-        m_outputCallback(text);
+        callback(text);
     }
 }
 
 void ConPTYTerminal::InvokeExitCallback(int exitCode) {
-    std::lock_guard<std::mutex> lock(m_callbackMutex);
-    if (m_exitCallback) {
-        m_exitCallback(exitCode);
+    // Copy callback under lock, invoke outside to prevent deadlock
+    ExitCallback callback;
+    {
+        std::lock_guard<std::mutex> lock(m_callbackMutex);
+        callback = m_exitCallback;
+    }
+    if (callback) {
+        callback(exitCode);
     }
 }
 
 void ConPTYTerminal::InvokeErrorCallback(const std::string& error) {
-    std::lock_guard<std::mutex> lock(m_callbackMutex);
-    if (m_errorCallback) {
-        m_errorCallback(error);
+    // Copy callback under lock, invoke outside to prevent deadlock
+    ErrorCallback callback;
+    {
+        std::lock_guard<std::mutex> lock(m_callbackMutex);
+        callback = m_errorCallback;
+    }
+    if (callback) {
+        callback(error);
     }
 }
 

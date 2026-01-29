@@ -481,17 +481,23 @@ void WebViewTerminal::ExecuteJavaScript(const std::string& script) {
 }
 
 void WebViewTerminal::WriteToXterm(const char* data, size_t length) {
-    if (!m_webViewReady) {
+#ifdef _WIN32
+    if (!m_webViewReady || !m_webView) {
         return;
     }
 
-    // Escape the data for JavaScript
-    std::string text(data, length);
-    std::string escaped = EscapeForJavaScript(text);
+    // Use PostWebMessageAsJson for safer data transfer (no JS injection risk)
+    // nlohmann::json handles all escaping properly
+    nlohmann::json msg;
+    msg["type"] = "write";
+    msg["data"] = std::string(data, length);
 
-    // Call terminalApi.write()
-    std::string js = "window.terminalApi.write(\"" + escaped + "\");";
-    ExecuteJavaScript(js);
+    std::wstring wideMsg = StringToWString(msg.dump());
+    m_webView->PostWebMessageAsJson(wideMsg.c_str());
+#else
+    (void)data;
+    (void)length;
+#endif
 }
 
 void WebViewTerminal::HandleInputFromXterm(const std::string& input) {
@@ -502,6 +508,13 @@ void WebViewTerminal::HandleInputFromXterm(const std::string& input) {
 }
 
 void WebViewTerminal::HandleResizeFromXterm(int cols, int rows) {
+    // Validate bounds to prevent invalid resize values from JavaScript
+    if (cols < 1 || cols > 1000 || rows < 1 || rows > 500) {
+        SMITH_WARN(smith::logging::Category::Terminal,
+                   "Invalid resize from xterm: {}x{} (ignored)", cols, rows);
+        return;
+    }
+
     // xterm.js has resized (e.g., via FitAddon)
     // Update our size and resize ConPTY to match
     m_cols = cols;
