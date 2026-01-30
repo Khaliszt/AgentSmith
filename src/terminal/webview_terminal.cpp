@@ -42,15 +42,16 @@ WebViewTerminal::~WebViewTerminal() {
     Terminate();
 
 #ifdef _WIN32
+    // Remove event handlers to prevent leaks
+    if (m_webView) {
+        m_webView->remove_NavigationCompleted(m_navigationToken);
+        m_webView->remove_WebMessageReceived(m_messageToken);
+    }
+
     // Clean up WebView2
     if (m_webViewController) {
         m_webViewController->Close();
         m_webViewController = nullptr;
-    }
-
-    if (m_hwnd) {
-        DestroyWindow(m_hwnd);
-        m_hwnd = nullptr;
     }
 #endif
 
@@ -129,30 +130,27 @@ void WebViewTerminal::OnWebView2ControllerCreated(HRESULT result,
 
     SMITH_INFO(smith::logging::Category::WebView, "WebView2 controller created");
 
-    // Get the HWND for the WebView2 window
-    m_webViewController->get_ParentWindow(&m_hwnd);
-
     // Set initial bounds
     RECT bounds = { m_x, m_y, m_x + m_width, m_y + m_height };
     m_webViewController->put_Bounds(bounds);
 
-    // Register navigation completed handler
+    // Register navigation completed handler (store token for cleanup)
     m_webView->add_NavigationCompleted(
         Callback<ICoreWebView2NavigationCompletedEventHandler>(
             [this](ICoreWebView2* sender, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
                 OnNavigationCompleted(sender, args);
                 return S_OK;
             }).Get(),
-        nullptr);
+        &m_navigationToken);
 
-    // Register web message handler (for JS → C++ communication)
+    // Register web message handler (store token for cleanup)
     m_webView->add_WebMessageReceived(
         Callback<ICoreWebView2WebMessageReceivedEventHandler>(
             [this](ICoreWebView2* sender, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
                 OnWebMessageReceived(sender, args);
                 return S_OK;
             }).Get(),
-        nullptr);
+        &m_messageToken);
 
     // Navigate to terminal.html
     std::wstring htmlPath = StringToWString(m_resourcesPath + "/terminal.html");
@@ -352,7 +350,8 @@ void WebViewTerminal::Clear() {
 
 #ifdef _WIN32
 HWND WebViewTerminal::GetNativeHandle() const {
-    return m_hwnd;
+    // Return the parent window handle (WebView2 controller manages its own window internally)
+    return m_parentHwnd;
 }
 #endif
 

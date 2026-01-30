@@ -2,6 +2,7 @@
 
 #include "terminal/terminal_factory.h"
 #include "terminal/conpty_terminal.h"
+#include "terminal/webview_terminal.h"
 #include "logging/logger.h"
 
 #ifdef _WIN32
@@ -88,19 +89,22 @@ std::unique_ptr<ITerminal> TerminalFactory::Create(
                 SMITH_INFO(logging::Category::Terminal,
                            "Creating WebView2 terminal (version: {})", version);
 
-                // TODO: Create WebViewTerminal when implemented
-                // For now, log warning and fall back to ConPTY
-                SMITH_WARN(logging::Category::Terminal,
-                           "WebViewTerminal not yet implemented (Phase 3.4), falling back to ConPTY");
+                // WebViewTerminal requires a parent HWND for WebView2 hosting
+                if (!parentHwnd) {
+                    SMITH_WARN(logging::Category::Terminal,
+                               "No parent HWND provided for WebView2, falling back to ConPTY");
+                    auto terminal = std::make_unique<ConPTYTerminal>();
+                    return terminal;
+                }
 
-                // Temporary fallback until WebViewTerminal is complete
-                auto terminal = std::make_unique<ConPTYTerminal>();
-                SMITH_INFO(logging::Category::Terminal,
-                           "Created ConPTYTerminal as temporary fallback");
+                auto terminal = std::make_unique<WebViewTerminal>();
+                SMITH_INFO(logging::Category::Terminal, "Created WebViewTerminal");
                 return terminal;
             } else {
                 SMITH_WARN(logging::Category::Terminal,
                            "WebView2 runtime not available, falling back to ConPTY");
+                auto terminal = std::make_unique<ConPTYTerminal>();
+                return terminal;
             }
 #else
             SMITH_ERROR(logging::Category::Terminal,
@@ -112,7 +116,7 @@ std::unique_ptr<ITerminal> TerminalFactory::Create(
 
         case TerminalBackend::ImGui: {
             // Phase 5: ImGui terminal fallback
-            // For now (Phase 3), use ConPTY as temporary fallback
+            // For now, use ConPTY as fallback
             SMITH_INFO(logging::Category::Terminal,
                        "ImGui terminal fallback not yet implemented (Phase 5), using ConPTY");
 

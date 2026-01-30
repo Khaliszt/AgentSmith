@@ -132,8 +132,11 @@ private:
     wil::com_ptr<ICoreWebView2Controller> m_webViewController;
     wil::com_ptr<ICoreWebView2> m_webView;
 
-    HWND m_hwnd = nullptr;  // WebView2 window handle
     HWND m_parentHwnd = nullptr;
+
+    // Event registration tokens for cleanup
+    EventRegistrationToken m_navigationToken{};
+    EventRegistrationToken m_messageToken{};
 #endif
 
     // ConPTY backend for process management

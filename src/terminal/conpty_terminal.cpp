@@ -397,8 +397,17 @@ void ConPTYTerminal::Write(const char* data, size_t length) {
         return;
     }
 
-    DWORD written;
-    WriteFile(m_hPipeIn, data, static_cast<DWORD>(length), &written, nullptr);
+    // Guard against size overflow on 64-bit systems
+    if (length > MAXDWORD) {
+        InvokeErrorCallback("Write data too large");
+        return;
+    }
+
+    DWORD written = 0;
+    if (!WriteFile(m_hPipeIn, data, static_cast<DWORD>(length), &written, nullptr)) {
+        DWORD err = GetLastError();
+        InvokeErrorCallback("Write failed with error: " + std::to_string(err));
+    }
 }
 
 void ConPTYTerminal::SetOutputCallback(OutputCallback callback) {

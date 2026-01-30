@@ -1,36 +1,36 @@
 // C:\FarfadetsCorp\AgentSmith\src\terminal\terminal_theme.cpp
 
 #include "terminal/terminal_theme.h"
+#include <nlohmann/json.hpp>
 #include <sstream>
 #include <iomanip>
 
 namespace smith::terminal {
 
 std::string TerminalTheme::ToJson() const {
-    std::ostringstream oss;
-    oss << "{\n";
-    oss << "  \"background\": \"" << background << "\",\n";
-    oss << "  \"foreground\": \"" << foreground << "\",\n";
-    oss << "  \"cursor\": \"" << cursor << "\",\n";
-    oss << "  \"selection\": \"" << selection << "\",\n";
-    oss << "  \"black\": \"" << ansi[0] << "\",\n";
-    oss << "  \"red\": \"" << ansi[1] << "\",\n";
-    oss << "  \"green\": \"" << ansi[2] << "\",\n";
-    oss << "  \"yellow\": \"" << ansi[3] << "\",\n";
-    oss << "  \"blue\": \"" << ansi[4] << "\",\n";
-    oss << "  \"magenta\": \"" << ansi[5] << "\",\n";
-    oss << "  \"cyan\": \"" << ansi[6] << "\",\n";
-    oss << "  \"white\": \"" << ansi[7] << "\",\n";
-    oss << "  \"brightBlack\": \"" << ansi[8] << "\",\n";
-    oss << "  \"brightRed\": \"" << ansi[9] << "\",\n";
-    oss << "  \"brightGreen\": \"" << ansi[10] << "\",\n";
-    oss << "  \"brightYellow\": \"" << ansi[11] << "\",\n";
-    oss << "  \"brightBlue\": \"" << ansi[12] << "\",\n";
-    oss << "  \"brightMagenta\": \"" << ansi[13] << "\",\n";
-    oss << "  \"brightCyan\": \"" << ansi[14] << "\",\n";
-    oss << "  \"brightWhite\": \"" << ansi[15] << "\"\n";
-    oss << "}";
-    return oss.str();
+    // Use nlohmann::json for proper escaping and formatting
+    nlohmann::json j;
+    j["background"] = background;
+    j["foreground"] = foreground;
+    j["cursor"] = cursor;
+    j["selection"] = selection;
+    j["black"] = ansi[0];
+    j["red"] = ansi[1];
+    j["green"] = ansi[2];
+    j["yellow"] = ansi[3];
+    j["blue"] = ansi[4];
+    j["magenta"] = ansi[5];
+    j["cyan"] = ansi[6];
+    j["white"] = ansi[7];
+    j["brightBlack"] = ansi[8];
+    j["brightRed"] = ansi[9];
+    j["brightGreen"] = ansi[10];
+    j["brightYellow"] = ansi[11];
+    j["brightBlue"] = ansi[12];
+    j["brightMagenta"] = ansi[13];
+    j["brightCyan"] = ansi[14];
+    j["brightWhite"] = ansi[15];
+    return j.dump();
 }
 
 uint32_t TerminalTheme::HexToImGui(const std::string& hexColor) {
