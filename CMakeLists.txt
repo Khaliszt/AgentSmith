@@ -61,6 +61,7 @@ add_library(smith_lib STATIC
     src/agent/agent_utils.cpp
     src/agent/agent_registry.cpp
     src/agent/agent_tracker.cpp
+    src/agent/conversation.cpp
     src/agent/providers/claude_provider.cpp
 
     # Terminal system (Phase 3)
@@ -68,6 +69,11 @@ add_library(smith_lib STATIC
     src/terminal/conpty_terminal.cpp
     src/terminal/webview_terminal.cpp
     src/terminal/terminal_factory.cpp
+
+    # Network system (Phase 4)
+    src/network/http_client.cpp
+    src/network/api_client.cpp
+    src/network/rate_limiter.cpp
 )
 
 target_include_directories(smith_lib PUBLIC
@@ -79,6 +85,7 @@ target_link_libraries(smith_lib PUBLIC
     imgui
     nlohmann_json::nlohmann_json
     spdlog::spdlog
+    httplib::httplib
 )
 
 # Platform-specific linking for library
